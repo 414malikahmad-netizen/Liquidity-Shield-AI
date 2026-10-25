@@ -6,35 +6,273 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Liquidity Shield AI</title>
 <style>
-body {
-  background: #07111e;
-  color: white;
-  font-family: Arial, sans-serif;
-  text-align: center;
-  padding: 30px 15px;
-}
-h1 { color: #67e8f9; }
-.card {
-  background: #142236;
-  border-radius: 15px;
-  padding: 25px;
-  margin-top: 30px;
-}
-.balance {
-  color: #67e8f9;
-  font-size: 36px;
-  font-weight: bold;
-}
+*{box-sizing:border-box}
+body{margin:0;background:#07111e;color:#f4f7fb;font-family:Arial,sans-serif}
+header{text-align:center;padding:25px 12px;background:#101e31}
+h1{color:#67e8f9;margin:8px 0;font-size:29px}
+h2{font-size:20px;margin:0 0 15px}
+small,.muted{color:#9aacc1}
+main{max-width:780px;margin:auto;padding:15px}
+.card{background:#142236;border-radius:16px;padding:20px;margin-bottom:16px}
+.balance{font-size:36px;font-weight:bold;color:#67e8f9}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>*{flex:1;min-width:120px}
+input,button{font-size:16px;padding:13px;border-radius:9px}
+input{background:#091727;color:white;border:1px solid #46556b;width:100%}
+button{background:#0891b2;color:white;border:0;font-weight:bold;cursor:pointer}
+button.secondary{background:#334155}
+button.danger{background:#b91c1c}
+button:disabled{opacity:.5}
+.item{border-top:1px solid #344459;padding:13px 0}
+.item:first-of-type{border-top:0}
+.stat{font-size:14px;color:#a9bdd1}
+.value{font-size:19px;font-weight:bold;margin:5px 0}
+.green{color:#4ade80}
+.red{color:#fb7185}
+.warning{color:#facc15}
+.pill{display:inline-block;background:#243c52;border-radius:15px;padding:6px 10px;font-size:12px}
+.notice{font-size:13px;color:#a9bdd1;line-height:1.5}
+footer{text-align:center;padding:25px;color:#8ca0b8}
 </style>
 </head>
 <body>
+<header>
 <h1>🛡️ Liquidity Shield AI</h1>
-<h3>Free Web Prototype</h3>
-<div class="card">
-  <h2>Paper Portfolio</h2>
-  <div class="balance">$10,000</div>
-  <p>Bot Status: OFF</p>
-  <p>Setup test successful!</p>
+<p>Crypto Research & Paper Trading</p>
+<span class="pill">VERSION 5 WEB PROTOTYPE</span>
+</header>
+<main>
+<section class="card">
+<h2>Paper Portfolio</h2>
+<div class="balance" id="equity">$10,000.00</div>
+<p>Available cash: <b id="cash">$10,000.00</b></p>
+<p>Profit / Loss: <b id="pnl">$0.00</b></p>
+<p>Bot status: <b id="status">OFF</b></p>
+<div class="row">
+<button id="startBtn" onclick="startBot()">Start Paper Bot</button>
+<button class="danger" onclick="stopBot()">Stop Bot</button>
+<button class="secondary" onclick="resetPortfolio()">Reset</button>
 </div>
+<p class="notice">Simulated money only. The bot runs while this webpage remains active. No real trades or deposits.</p>
+</section>
+
+<section class="card">
+<h2>Research Cryptocurrency</h2>
+<div class="row">
+<input id="query" placeholder="Search BTC, SOL, NIGHT, PEPE..." value="SOL">
+<button onclick="searchCoins()">Search</button>
+</div>
+<p id="message" class="notice">Search for a cryptocurrency to begin.</p>
+<div id="results"></div>
+</section>
+
+<section class="card">
+<h2>Trading Watchlist</h2>
+<p class="notice">Add a market from your search results. The paper bot checks selected markets approximately every 30 seconds while the page is active.</p>
+<div id="watchlist">No markets selected.</div>
+</section>
+
+<section class="card">
+<h2>Open Paper Positions</h2>
+<div id="positions">No open positions.</div>
+</section>
+
+<section class="card">
+<h2>Trade History</h2>
+<div id="history">No simulated trades yet.</div>
+</section>
+
+<section class="card">
+<h2>Risk Controls</h2>
+<p>Position size: 2% of portfolio</p>
+<p>Stop loss: 5% below entry</p>
+<p>Take profit: 10% above entry</p>
+<p>Maximum positions: 3</p>
+<p>Estimated transaction fee: 0.3% per side</p>
+<p>Estimated slippage: 0.2% per side</p>
+<p class="notice">These are illustrative settings, not recommendations. Prices and signals are approximate and do not guarantee executable trades.</p>
+</section>
+</main>
+<footer>Liquidity Shield AI · Research and simulation only</footer>
+<script>
+const API="https://api.dexscreener.com";
+const START=10000;
+const FEE=.003;
+const SLIP=.002;
+let state={
+cash:START,
+positions:[],
+history:[],
+watchlist:[],
+running:false
+};
+let busy=false;
+let timer=null;
+const $=id=>document.getElementById(id);
+const money=n=>"$"+Number(n||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const price=n=>Number(n||0).toLocaleString("en-US",{maximumSignificantDigits:8});
+const escapeHTML=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const key=p=>p.chainId+":"+p.pairAddress;
+function load(){
+try{
+const saved=JSON.parse(localStorage.getItem("shieldPaperV5"));
+if(saved&&typeof saved.cash==="number"&&Array.isArray(saved.positions)&&Array.isArray(saved.watchlist)&&Array.isArray(saved.history)){
+state={...state,...saved,running:false};
+}
+}catch(e){}
+render();
+}
+function save(){
+try{localStorage.setItem("shieldPaperV5",JSON.stringify({...state,running:false}));}catch(e){}
+}
+function equity(){
+return state.cash+state.positions.reduce((sum,p)=>sum+p.quantity*p.lastPrice,0);
+}
+function render(){
+$("cash").textContent=money(state.cash);
+$("equity").textContent=money(equity());
+const gain=equity()-START;
+$("pnl").textContent=(gain>=0?"+":"")+money(gain);
+$("pnl").className=gain>=0?"green":"red";
+$("status").textContent=state.running?"RUNNING":"OFF";
+$("status").className=state.running?"green":"warning";
+$("startBtn").disabled=state.running;
+$("watchlist").innerHTML=state.watchlist.length?state.watchlist.map(p=>`
+<div class="item">
+<b>${escapeHTML(p.baseToken?.symbol||"?")}/${escapeHTML(p.quoteToken?.symbol||"?")}</b>
+<div class="stat">${escapeHTML(p.chainId)} · ${escapeHTML(p.dexId)}</div>
+<div>Price: ${money(p.priceUsd)} · Liquidity: ${money(p.liquidity?.usd)}</div>
+<button class="secondary" onclick="removeWatch('${encodeURIComponent(key(p))}')">Remove</button>
+</div>`).join(""):"No markets selected.";
+$("positions").innerHTML=state.positions.length?state.positions.map(p=>{
+const gain=(p.lastPrice-p.entryPrice)*p.quantity;
+return `<div class="item"><b>${escapeHTML(p.symbol)}</b>
+<div>Quantity: ${price(p.quantity)}</div>
+<div>Entry: ${money(p.entryPrice)} · Last: ${money(p.lastPrice)}</div>
+<div>Stop: ${money(p.stop)} · Target: ${money(p.target)}</div>
+<div class="${gain>=0?"green":"red"}">Unrealized change: ${money(gain)}</div>
+</div>`;
+}).join(""):"No open positions.";
+$("history").innerHTML=state.history.length?state.history.slice(0,25).map(t=>`
+<div class="item"><b>${escapeHTML(t.type)} ${escapeHTML(t.symbol)}</b>
+<div class="stat">${escapeHTML(t.date)}</div>
+<div>${money(t.amount)} · ${escapeHTML(t.note)}</div></div>`).join(""):"No simulated trades yet.";
+}
+async function searchCoins(){
+const q=$("query").value.trim();
+if(!q)return;
+$("message").textContent="Searching live decentralized exchange pools...";
+$("results").innerHTML="";
+try{
+const r=await fetch(API+"/latest/dex/search?q="+encodeURIComponent(q));
+if(!r.ok)throw Error("Market service unavailable");
+const data=await r.json();
+const pools=(data.pairs||[]).filter(p=>Number(p.priceUsd)>0)
+.sort((a,b)=>(Number(b.liquidity?.usd)||0)-(Number(a.liquidity?.usd)||0)).slice(0,12);
+window.searchResults=pools;
+$("message").textContent=pools.length?pools.length+" markets found. Review the chain and liquidity before selecting.":"No pools found.";
+$("results").innerHTML=pools.map((p,i)=>{
+const change=Number(p.priceChange?.h24)||0;
+const entry=Number(p.priceUsd);
+return `<div class="item">
+<b>${escapeHTML(p.baseToken?.symbol||"?")}/${escapeHTML(p.quoteToken?.symbol||"?")}</b>
+<div class="stat">${escapeHTML(p.chainId)} · ${escapeHTML(p.dexId)}</div>
+<div class="value">${money(entry)}</div>
+<div>24h change: <span class="${change>=0?"green":"red"}">${change.toFixed(2)}%</span></div>
+<div>Liquidity: ${money(p.liquidity?.usd)} · 24h volume: ${money(p.volume?.h24)}</div>
+<div class="stat">Illustrative entry: ${money(entry)} · Stop: ${money(entry*.95)} · Target: ${money(entry*1.10)}</div>
+<p><span class="pill">${escapeHTML(signal(p))}</span></p>
+<button onclick="addWatch(${i})">Add to Watchlist</button>
+</div>`;
+}).join("");
+}catch(e){$("message").textContent="Search failed. Check your connection or try again later.";}
+}
+function eligible(p){
+const liq=Number(p.liquidity?.usd)||0;
+const vol=Number(p.volume?.h24)||0;
+const ch=Number(p.priceChange?.h24);
+return liq>=100000&&vol>=50000&&Number.isFinite(ch)&&ch>-10&&ch<12;
+}
+function signal(p){
+if(!eligible(p))return "HIGH RISK / INSUFFICIENT DATA";
+const c=Number(p.priceChange.h24);
+return c>=1&&c<=6?"PAPER BUY CANDIDATE":"WATCH / WAIT";
+}
+function addWatch(i){
+const p=window.searchResults?.[i];
+if(!p)return;
+if(state.watchlist.some(x=>key(x)===key(p))){alert("Already on watchlist.");return;}
+if(state.watchlist.length>=10){alert("Maximum 10 markets.");return;}
+state.watchlist.push(p);save();render();
+}
+function removeWatch(encoded){
+const id=decodeURIComponent(encoded);
+state.watchlist=state.watchlist.filter(p=>key(p)!==id);
+save();render();
+}
+function startBot(){
+if(!state.watchlist.length){alert("Add at least one market to the watchlist first.");return;}
+state.running=true;render();
+tick();
+timer=setInterval(tick,30000);
+}
+function stopBot(){
+state.running=false;
+if(timer){clearInterval(timer);timer=null;}
+render();
+}
+function resetPortfolio(){
+if(!confirm("Reset all simulated cash, positions, and trade history?"))return;
+stopBot();
+state.cash=START;
+state.positions=[];
+state.history=[];
+save();render();
+}
+async function tick(){
+if(busy||!state.running)return;
+busy=true;
+try{
+for(const watched of [...state.watchlist]){
+if(!state.running)break;
+try{
+const url=API+"/latest/dex/pairs/"+encodeURIComponent(watched.chainId)+"/"+encodeURIComponent(watched.pairAddress);
+const r=await fetch(url);
+if(!r.ok)continue;
+const d=await r.json();
+const p=(d.pairs||[]).find(x=>key(x)===key(watched));
+if(!p||!(Number(p.priceUsd)>0))continue;
+const last=Number(p.priceUsd);
+const id=key(p);
+const w=state.watchlist.findIndex(x=>key(x)===id);
+if(w>=0)state.watchlist[w]=p;
+const position=state.positions.find(x=>x.id===id);
+if(position){
+position.lastPrice=last;
+if(last<=position.stop||last>=position.target){
+const sale=position.quantity*last*(1-SLIP)*(1-FEE);
+state.cash+=sale;
+state.history.unshift({type:"SELL",symbol:position.symbol,amount:sale,date:new Date().toLocaleString(),note:last<=position.stop?"Stop triggered":"Target triggered"});
+state.positions=state.positions.filter(x=>x.id!==id);
+}
+}else if(state.positions.length<3&&eligible(p)&&Number(p.priceChange.h24)>=1&&Number(p.priceChange.h24)<=6){
+const budget=Math.min(state.cash,equity()*.02);
+if(budget>=5){
+const execution=last*(1+SLIP);
+const qty=budget*(1-FEE)/execution;
+state.cash-=budget;
+const symbol=p.baseToken?.symbol||"?";
+state.positions.push({id,symbol,quantity:qty,entryPrice:execution,lastPrice:last,stop:execution*.95,target:execution*1.10});
+state.history.unshift({type:"BUY",symbol,amount:budget,date:new Date().toLocaleString(),note:"Illustrative momentum rule"});
+}
+}
+}catch(e){}
+}
+save();render();
+}finally{busy=false;}
+}
+window.addEventListener("pagehide",()=>{stopBot();save();});
+load();
+</script>
 </body>
 </html>
